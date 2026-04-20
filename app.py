@@ -303,7 +303,7 @@ def check_account_full(account_line, proxy=None, cookie=None, result_folder='res
     if proxy:
         session.proxies = {'http': proxy, 'https': proxy}
 
-    # Use cookie or fetch
+    # Use provided cookie or fetch new one
     if cookie:
         session.cookies.set('datadome', cookie, domain='.garena.com')
     else:
@@ -482,6 +482,7 @@ def start_check():
     cookies = []
     cookie_file = request.files.get('cookies')
     if cookie_file:
+        # Manual upload takes priority
         content = cookie_file.read().decode('utf-8')
         for line in content.splitlines():
             line = line.strip()
@@ -501,6 +502,31 @@ def start_check():
                     cookies.append(val)
             else:
                 cookies.append(line)
+    else:
+        # No manual upload – check for fresh_cookie.txt in the same folder
+        default_cookie_path = os.path.join(os.path.dirname(__file__), 'fresh_cookie.txt')
+        if os.path.exists(default_cookie_path):
+            with open(default_cookie_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            for line in content.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if ';' in line:
+                    for part in line.split(';'):
+                        part = part.strip()
+                        if part.startswith('datadome='):
+                            val = part.split('=', 1)[1].strip()
+                            if val:
+                                cookies.append(val)
+                                break
+                elif line.startswith('datadome='):
+                    val = line.split('=', 1)[1].strip()
+                    if val:
+                        cookies.append(val)
+                else:
+                    cookies.append(line)
+            print(f"✅ Auto-loaded {len(cookies)} cookies from fresh_cookie.txt")
 
     result_folder = os.path.join(app.config['RESULTS_FOLDER'], task_id)
     os.makedirs(result_folder, exist_ok=True)
@@ -559,7 +585,6 @@ def start_check():
                 tasks[task_id]['codm'] = codm_count
                 tasks[task_id]['last_error'] = last_error
 
-                # Send progress update
                 progress_queue.put({
                     'checked': checked,
                     'total': len(accounts),
@@ -573,7 +598,6 @@ def start_check():
                 })
                 time.sleep(0.1)
 
-            # Create ZIP
             zip_path = os.path.join(app.config['RESULTS_FOLDER'], f'{task_id}.zip')
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for root, _, files in os.walk(result_folder):
@@ -605,18 +629,15 @@ def progress(task_id):
         last_heartbeat = time.time()
         while True:
             try:
-                # Use timeout to send heartbeats
                 msg = q.get(timeout=5)
                 yield f'data: {json.dumps(msg)}\n\n'
                 last_heartbeat = time.time()
                 if msg.get('done'):
                     break
             except queue.Empty:
-                # Send heartbeat to keep connection alive
                 if time.time() - last_heartbeat > 5:
                     yield f'data: {json.dumps({"heartbeat": True})}\n\n'
                     last_heartbeat = time.time()
-                # Check if task still exists and is running
                 if task_id not in tasks or tasks[task_id].get('status') in ('completed', 'error'):
                     break
     return Response(generate(), mimetype='text/event-stream')
