@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CODM Account Checker · Full</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            max-width: 750px;
+            width: 100%;
+            background: rgba(20, 20, 40, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 28px;
+            padding: 32px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.6);
+            color: #fff;
+        }
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+            background: linear-gradient(90deg, #ff6a00, #ee0979);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .sub {
+            color: #b0b0d0;
+            margin-bottom: 28px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 16px;
+        }
+        .form-group {
+            margin-bottom: 22px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #e0e0ff;
+        }
+        input[type="file"], input[type="number"] {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 14px;
+            color: white;
+            font-size: 1rem;
+        }
+        input[type="file"]::file-selector-button {
+            background: #3a3a6a;
+            color: white;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 30px;
+            margin-right: 16px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        input:focus {
+            outline: none;
+            border-color: #ee0979;
+            box-shadow: 0 0 0 3px rgba(238, 9, 121, 0.2);
+        }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0,0,0,0.3);
+            padding: 14px 18px;
+            border-radius: 14px;
+            margin-bottom: 18px;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 54px;
+            height: 28px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #4a4a7a;
+            transition: .3s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px; width: 22px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background: linear-gradient(90deg, #ff6a00, #ee0979); }
+        input:checked + .slider:before { transform: translateX(26px); }
+        #proxyFileGroup {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        #proxyFileGroup.show { max-height: 120px; }
+        .btn {
+            background: linear-gradient(90deg, #ff6a00, #ee0979);
+            color: white;
+            border: none;
+            padding: 16px 28px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            border-radius: 40px;
+            width: 100%;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-top: 20px;
+        }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn:hover:not(:disabled) { transform: scale(1.01); box-shadow: 0 10px 30px rgba(238, 9, 121, 0.4); }
+        .progress-section { margin-top: 30px; }
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            color: #ccc;
+        }
+        .progress-bar {
+            height: 14px;
+            background: rgba(0,0,0,0.4);
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 18px;
+        }
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ff6a00, #ee0979);
+            border-radius: 20px;
+            transition: width 0.3s;
+        }
+        .log-box {
+            background: #0a0a1a;
+            border-radius: 16px;
+            padding: 16px;
+            height: 220px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9rem;
+            border: 1px solid #3a3a6a;
+            color: #a0f0ff;
+        }
+        .download-btn {
+            background: #00b894;
+            margin-top: 24px;
+            display: none;
+        }
+        .footer { text-align: center; margin-top: 20px; color: #7a7a9a; font-size: 0.8rem; }
+        small { color: #9a9ac0; display: block; margin-top: 6px; }
+        .checkbox-group { display: flex; align-items: center; gap: 12px; margin: 15px 0; }
+        .checkbox-group label { margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔥 CODM Account Checker</h1>
+        <div class="sub">Full version · CODM level · Game connections · Clean detection</div>
+
+        <form id="checkForm">
+            <div class="form-group">
+                <label>📁 Combo File (email:pass per line)</label>
+                <input type="file" name="combo" accept=".txt" required>
+            </div>
+
+            <div class="form-group">
+                <label>⚙️ Threads (1-10)</label>
+                <input type="number" name="threads" min="1" max="10" value="3">
+            </div>
+
+            <div class="toggle-container">
+                <span class="toggle-label">🛡️ Use Proxy</span>
+                <label class="switch">
+                    <input type="checkbox" id="proxyToggle" name="use_proxy" value="true">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div id="proxyFileGroup">
+                <div class="form-group">
+                    <label>🌐 Proxy List (.txt, ip:port or http://user:pass@ip:port)</label>
+                    <input type="file" name="proxies" accept=".txt" id="proxyFileInput">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>🍪 DataDome Cookies (fresh_cookie.txt)</label>
+                <input type="file" name="cookies" accept=".txt">
+                <small>Supports: datadome=xxx; sso_key=...; or raw token per line</small>
+            </div>
+
+            <div class="checkbox-group">
+                <input type="checkbox" id="checkGamesToggle" name="check_games" value="true" checked>
+                <label for="checkGamesToggle">🎮 Check other games (Free Fire, ROV, Delta Force, etc.)</label>
+            </div>
+
+            <button type="submit" class="btn" id="startBtn">▶ START CHECKING</button>
+        </form>
+
+        <div class="progress-section">
+            <div class="stats">
+                <span>Progress: <span id="statsText">0/0</span></span>
+                <span>✅ Valid: <span id="validCount">0</span> | 🧼 Clean: <span id="cleanCount">0</span> | 🎮 CODM: <span id="codmCount">0</span></span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="log-box" id="logContainer">
+                <div class="log-entry">✨ Ready. Upload combo and start.</div>
+            </div>
+            <button class="btn download-btn" id="downloadBtn">⬇ Download Results ZIP</button>
+        </div>
+        <div class="footer">
+            Results include Clean/Not Clean, Shell, CODM by level/region, and other games.
+        </div>
+    </div>
+
+    <script>
+        const proxyToggle = document.getElementById('proxyToggle');
+        const proxyFileGroup = document.getElementById('proxyFileGroup');
+        const proxyFileInput = document.getElementById('proxyFileInput');
+        const checkGamesToggle = document.getElementById('checkGamesToggle');
+        const form = document.getElementById('checkForm');
+        const startBtn = document.getElementById('startBtn');
+        const progressFill = document.getElementById('progressFill');
+        const statsText = document.getElementById('statsText');
+        const validCount = document.getElementById('validCount');
+        const cleanCount = document.getElementById('cleanCount');
+        const codmCount = document.getElementById('codmCount');
+        const logContainer = document.getElementById('logContainer');
+        const downloadBtn = document.getElementById('downloadBtn');
+
+        function toggleProxyUpload() {
+            if (proxyToggle.checked) {
+                proxyFileGroup.classList.add('show');
+                proxyFileInput.required = true;
+            } else {
+                proxyFileGroup.classList.remove('show');
+                proxyFileInput.required = false;
+            }
+        }
+        proxyToggle.addEventListener('change', toggleProxyUpload);
+        toggleProxyUpload();
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            startBtn.disabled = true;
+            downloadBtn.style.display = 'none';
+            logContainer.innerHTML = '<div class="log-entry">🚀 Initializing check...</div>';
+            statsText.textContent = '0/0';
+            validCount.textContent = '0';
+            cleanCount.textContent = '0';
+            codmCount.textContent = '0';
+            progressFill.style.width = '0%';
+
+            const formData = new FormData(form);
+            formData.set('use_proxy', proxyToggle.checked ? 'true' : 'false');
+            formData.set('check_games', checkGamesToggle.checked ? 'true' : 'false');
+
+            const response = await fetch('/start', { method: 'POST', body: formData });
+            const data = await response.json();
+            if (data.error) {
+                logContainer.innerHTML += `<div class="log-entry" style="color:#ff6b6b">❌ ${data.error}</div>`;
+                startBtn.disabled = false;
+                return;
+            }
+
+            const taskId = data.task_id;
+            const evtSource = new EventSource(`/progress/${taskId}`);
+
+            evtSource.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.error) {
+                    logContainer.innerHTML += `<div class="log-entry" style="color:#ff6b6b">❌ ${msg.error}</div>`;
+                    evtSource.close();
+                    startBtn.disabled = false;
+                    return;
+                }
+                if (msg.heartbeat) return;
+
+                if (msg.checked !== undefined) {
+                    const percent = msg.total > 0 ? Math.round((msg.checked / msg.total) * 100) : 0;
+                    progressFill.style.width = percent + '%';
+                    statsText.textContent = `${msg.checked}/${msg.total}`;
+                    validCount.textContent = msg.valid;
+                    cleanCount.textContent = msg.clean;
+                    codmCount.textContent = msg.codm || 0;
+
+                    if (msg.current) {
+                        const entry = document.createElement('div');
+                        entry.className = 'log-entry';
+                        let line = `🔍 ${msg.current}`;
+                        if (msg.level) line += ` — CODM Lv.${msg.level}`;
+                        entry.textContent = line;
+                        logContainer.appendChild(entry);
+                        logContainer.scrollTop = logContainer.scrollHeight;
+                    }
+                }
+
+                if (msg.done) {
+                    logContainer.innerHTML += '<div class="log-entry" style="color:#55efc4">✅ Check complete! Download ready.</div>';
+                    evtSource.close();
+                    startBtn.disabled = false;
+                    downloadBtn.style.display = 'block';
+                    downloadBtn.onclick = () => { window.location.href = msg.zip; };
+                }
+            };
+
+            evtSource.onerror = () => {
+                logContainer.innerHTML += '<div class="log-entry" style="color:#ff6b6b">⚠️ Connection lost. Check may still be running.</div>';
+                evtSource.close();
+                startBtn.disabled = false;
+            };
+        });
+    </script>
+</body>
+</html>
