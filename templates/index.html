@@ -17,7 +17,7 @@
             padding: 20px;
         }
         .card {
-            max-width: 750px;
+            max-width: 800px;
             width: 100%;
             background: rgba(20, 20, 40, 0.7);
             backdrop-filter: blur(12px);
@@ -134,9 +134,11 @@
         .progress-section { margin-top: 30px; }
         .stats {
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-between;
             margin-bottom: 8px;
             color: #ccc;
+            gap: 8px;
         }
         .progress-bar {
             height: 14px;
@@ -156,13 +158,16 @@
             background: #0a0a1a;
             border-radius: 16px;
             padding: 16px;
-            height: 220px;
+            height: 250px;
             overflow-y: auto;
             font-family: monospace;
             font-size: 0.9rem;
             border: 1px solid #3a3a6a;
             color: #a0f0ff;
         }
+        .log-entry { margin-bottom: 2px; }
+        .log-error { color: #ff6b6b; }
+        .log-success { color: #55efc4; }
         .download-btn {
             background: #00b894;
             margin-top: 24px;
@@ -172,6 +177,17 @@
         small { color: #9a9ac0; display: block; margin-top: 6px; }
         .checkbox-group { display: flex; align-items: center; gap: 12px; margin: 15px 0; }
         .checkbox-group label { margin: 0; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .badge-valid { background: #00b894; color: white; }
+        .badge-invalid { background: #d63031; color: white; }
+        .badge-clean { background: #0984e3; color: white; }
+        .badge-codm { background: #e17055; color: white; }
     </style>
 </head>
 <body>
@@ -221,8 +237,11 @@
 
         <div class="progress-section">
             <div class="stats">
-                <span>Progress: <span id="statsText">0/0</span></span>
-                <span>✅ Valid: <span id="validCount">0</span> | 🧼 Clean: <span id="cleanCount">0</span> | 🎮 CODM: <span id="codmCount">0</span></span>
+                <span>Progress: <strong id="statsText">0/0</strong></span>
+                <span><span class="badge badge-valid" id="validBadge">✅ 0</span></span>
+                <span><span class="badge badge-invalid" id="invalidBadge">❌ 0</span></span>
+                <span><span class="badge badge-clean" id="cleanBadge">🧼 0</span></span>
+                <span><span class="badge badge-codm" id="codmBadge">🎮 0</span></span>
             </div>
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
@@ -246,11 +265,14 @@
         const startBtn = document.getElementById('startBtn');
         const progressFill = document.getElementById('progressFill');
         const statsText = document.getElementById('statsText');
-        const validCount = document.getElementById('validCount');
-        const cleanCount = document.getElementById('cleanCount');
-        const codmCount = document.getElementById('codmCount');
+        const validBadge = document.getElementById('validBadge');
+        const invalidBadge = document.getElementById('invalidBadge');
+        const cleanBadge = document.getElementById('cleanBadge');
+        const codmBadge = document.getElementById('codmBadge');
         const logContainer = document.getElementById('logContainer');
         const downloadBtn = document.getElementById('downloadBtn');
+
+        let currentEventSource = null;
 
         function toggleProxyUpload() {
             if (proxyToggle.checked) {
@@ -264,75 +286,116 @@
         proxyToggle.addEventListener('change', toggleProxyUpload);
         toggleProxyUpload();
 
+        function addLog(message, isError = false, isSuccess = false) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            if (isError) entry.classList.add('log-error');
+            if (isSuccess) entry.classList.add('log-success');
+            entry.textContent = message;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            // Close any existing SSE connection
+            if (currentEventSource) {
+                currentEventSource.close();
+                currentEventSource = null;
+            }
+
             startBtn.disabled = true;
             downloadBtn.style.display = 'none';
-            logContainer.innerHTML = '<div class="log-entry">🚀 Initializing check...</div>';
+            logContainer.innerHTML = '';
+            addLog('🚀 Initializing check...', false, false);
             statsText.textContent = '0/0';
-            validCount.textContent = '0';
-            cleanCount.textContent = '0';
-            codmCount.textContent = '0';
+            validBadge.textContent = '✅ 0';
+            invalidBadge.textContent = '❌ 0';
+            cleanBadge.textContent = '🧼 0';
+            codmBadge.textContent = '🎮 0';
             progressFill.style.width = '0%';
 
             const formData = new FormData(form);
             formData.set('use_proxy', proxyToggle.checked ? 'true' : 'false');
             formData.set('check_games', checkGamesToggle.checked ? 'true' : 'false');
 
-            const response = await fetch('/start', { method: 'POST', body: formData });
-            const data = await response.json();
-            if (data.error) {
-                logContainer.innerHTML += `<div class="log-entry" style="color:#ff6b6b">❌ ${data.error}</div>`;
-                startBtn.disabled = false;
-                return;
-            }
-
-            const taskId = data.task_id;
-            const evtSource = new EventSource(`/progress/${taskId}`);
-
-            evtSource.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                if (msg.error) {
-                    logContainer.innerHTML += `<div class="log-entry" style="color:#ff6b6b">❌ ${msg.error}</div>`;
-                    evtSource.close();
+            try {
+                const response = await fetch('/start', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (data.error) {
+                    addLog(`❌ ${data.error}`, true);
                     startBtn.disabled = false;
                     return;
                 }
-                if (msg.heartbeat) return;
 
-                if (msg.checked !== undefined) {
-                    const percent = msg.total > 0 ? Math.round((msg.checked / msg.total) * 100) : 0;
-                    progressFill.style.width = percent + '%';
-                    statsText.textContent = `${msg.checked}/${msg.total}`;
-                    validCount.textContent = msg.valid;
-                    cleanCount.textContent = msg.clean;
-                    codmCount.textContent = msg.codm || 0;
+                const taskId = data.task_id;
+                const evtSource = new EventSource(`/progress/${taskId}`);
+                currentEventSource = evtSource;
 
-                    if (msg.current) {
-                        const entry = document.createElement('div');
-                        entry.className = 'log-entry';
-                        let line = `🔍 ${msg.current}`;
-                        if (msg.level) line += ` — CODM Lv.${msg.level}`;
-                        entry.textContent = line;
-                        logContainer.appendChild(entry);
-                        logContainer.scrollTop = logContainer.scrollHeight;
+                evtSource.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.error) {
+                            addLog(`❌ ${msg.error}`, true);
+                            evtSource.close();
+                            currentEventSource = null;
+                            startBtn.disabled = false;
+                            return;
+                        }
+                        if (msg.heartbeat) return;
+
+                        if (msg.checked !== undefined) {
+                            const percent = msg.total > 0 ? Math.round((msg.checked / msg.total) * 100) : 0;
+                            progressFill.style.width = percent + '%';
+                            statsText.textContent = `${msg.checked}/${msg.total}`;
+                            validBadge.textContent = `✅ ${msg.valid}`;
+                            invalidBadge.textContent = `❌ ${msg.invalid || 0}`;
+                            cleanBadge.textContent = `🧼 ${msg.clean}`;
+                            codmBadge.textContent = `🎮 ${msg.codm || 0}`;
+
+                            if (msg.current) {
+                                let line = `🔍 ${msg.current}`;
+                                if (msg.level) line += ` — CODM Lv.${msg.level}`;
+                                if (msg.error) {
+                                    line += ` — ❌ ${msg.error}`;
+                                    addLog(line, true);
+                                } else {
+                                    addLog(line, false);
+                                }
+                            }
+                        }
+
+                        if (msg.done) {
+                            if (msg.error) {
+                                addLog(`❌ Check failed: ${msg.error}`, true);
+                            } else {
+                                addLog('✅ Check complete! Download ready.', true, false);
+                                downloadBtn.style.display = 'block';
+                                downloadBtn.onclick = () => { window.location.href = msg.zip; };
+                            }
+                            evtSource.close();
+                            currentEventSource = null;
+                            startBtn.disabled = false;
+                        }
+                    } catch (e) {
+                        console.error('Parse error:', e);
                     }
-                }
+                };
 
-                if (msg.done) {
-                    logContainer.innerHTML += '<div class="log-entry" style="color:#55efc4">✅ Check complete! Download ready.</div>';
+                evtSource.onerror = (err) => {
+                    console.error('SSE error:', err);
+                    addLog('⚠️ Connection lost. Check may still be running in background.', true);
                     evtSource.close();
+                    currentEventSource = null;
                     startBtn.disabled = false;
-                    downloadBtn.style.display = 'block';
-                    downloadBtn.onclick = () => { window.location.href = msg.zip; };
-                }
-            };
+                    // Optionally poll for status
+                };
 
-            evtSource.onerror = () => {
-                logContainer.innerHTML += '<div class="log-entry" style="color:#ff6b6b">⚠️ Connection lost. Check may still be running.</div>';
-                evtSource.close();
+            } catch (err) {
+                addLog(`❌ Failed to start: ${err.message}`, true);
                 startBtn.disabled = false;
-            };
+            }
         });
     </script>
 </body>
